@@ -12,6 +12,8 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Point;
 import android.graphics.Rect;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.Drawable;
 import android.net.wifi.ScanResult;
 import android.os.AsyncTask;
 import android.os.Build;
@@ -126,7 +128,6 @@ public final class MapActivity extends Activity {
         registerReceiver(mReceiver, new IntentFilter(ScannerService.MESSAGE_TOPIC));
 
         mMap.getController().setZoom(2);
-        new TrackOverlayTask().execute(mMap);
 
         Log.d(LOGTAG, "onCreate");
     }
@@ -260,8 +261,11 @@ public final class MapActivity extends Activity {
         @Override
         protected void onPostExecute(GeoPoint[] points) {
             ArrayList<OverlayItem> items = new ArrayList<OverlayItem>();
+            if (points == null) { return; }
             for (int i = 0; i < points.length; i++) {
-                items.add(new OverlayItem(null, null, points[i]));
+                OverlayItem item = new OverlayItem(null, null, points[i]);
+                item.setMarker(getResources().getDrawable(android.R.drawable.ic_input_add));
+                items.add(item);
             }
             mMap.getOverlays().add(new ItemizedOverlayWithFocus<OverlayItem>(
                     MapActivity.this,
@@ -283,10 +287,8 @@ public final class MapActivity extends Activity {
 
             cursor.moveToPosition(-1);
             while (cursor.moveToNext()) {
-                pointArray[iterator].setCoordsE6(
-                        cursor.getInt(columnLat),
-                        cursor.getInt(columnLon)
-                );
+                pointArray[iterator] = new GeoPoint(cursor.getInt(columnLat),cursor.getInt(columnLon));
+                iterator = iterator + 1;
             }
 
             if (pointArray.length == 0) { return null;}
