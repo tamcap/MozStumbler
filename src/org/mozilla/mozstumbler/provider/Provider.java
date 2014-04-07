@@ -251,7 +251,7 @@ public class Provider extends ContentProvider {
 
     private Cursor getTrack(String[] projection, String selection, String[] selectionArgs) {
         final SQLiteQueryBuilder builder = new SQLiteQueryBuilder();
-        builder.setTables(Database.INDEX_TRACK);
+        builder.setTables(Database.TABLE_TRACK);
         return builder.query(mDbHelper.getReadableDatabase(), projection, selection, selectionArgs, null, null, null);
     }
 }
