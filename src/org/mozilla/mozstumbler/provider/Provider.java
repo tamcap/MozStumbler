@@ -28,6 +28,7 @@ public class Provider extends ContentProvider {
     private static final int REPORTS_ID = 2;
     private static final int REPORTS_SUMMARY = 3;
     private static final int SYNC_STATS = 4;
+    private static final int TRACK = 5;
 
     private static final UriMatcher sUriMatcher = buildUriMatcher();
     private static HashMap<String, String> sReportSummaryProjectionMap = buildReportSummaryProjectionMap();
@@ -43,6 +44,7 @@ public class Provider extends ContentProvider {
         matcher.addURI(authority, "reports/summary", REPORTS_SUMMARY);
         matcher.addURI(authority, "reports/*", REPORTS_ID);
         matcher.addURI(authority, "sync_stats", SYNC_STATS);
+        matcher.addURI(authority, "track", TRACK);
 
         return matcher;
     }
@@ -95,6 +97,10 @@ public class Provider extends ContentProvider {
                 cursor = getSyncStats(projection);
                 cursor.setNotificationUri(getContext().getContentResolver(), Stats.CONTENT_URI);
                 break;
+            case TRACK:
+                cursor = getTrack(projection, selection, selectionArgs);
+                cursor.setNotificationUri(getContext().getContentResolver(), Track.CONTENT_URI);
+                break;
             default:
                 throw new UnsupportedOperationException("Unknown uri: " + uri);
         }
@@ -135,6 +141,10 @@ public class Provider extends ContentProvider {
                     }
                     resolver.notifyChange(Reports.CONTENT_URI_SUMMARY, null, false);
                 }
+                return ContentUris.withAppendedId(uri, rowId);
+            case TRACK:
+                db = mDbHelper.getWritableDatabase();
+                rowId = db.insertWithOnConflict(Database.TABLE_TRACK, null, values,SQLiteDatabase.CONFLICT_IGNORE);
                 return ContentUris.withAppendedId(uri, rowId);
             default:
                 throw new UnsupportedOperationException("Unknown uri: " + uri);
@@ -237,5 +247,11 @@ public class Provider extends ContentProvider {
         final SQLiteQueryBuilder builder = new SQLiteQueryBuilder();
         builder.setTables(Database.TABLE_STATS);
         return builder.query(mDbHelper.getReadableDatabase(), projection, null, null, null, null, null);
+    }
+
+    private Cursor getTrack(String[] projection, String selection, String[] selectionArgs) {
+        final SQLiteQueryBuilder builder = new SQLiteQueryBuilder();
+        builder.setTables(Database.INDEX_TRACK);
+        return builder.query(mDbHelper.getReadableDatabase(), projection, selection, selectionArgs, null, null, null);
     }
 }

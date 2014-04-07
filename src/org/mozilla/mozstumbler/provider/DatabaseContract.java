@@ -14,6 +14,7 @@ public final class DatabaseContract {
     private static final String PATH_REPORTS = "reports";
     private static final String PATH_REPORT_SUMMARY = "summary";
     private static final String PATH_SYNC_STATS = "sync_stats";
+    private static final String PATH_TRACK = "track";
 
     interface ReportsColumns {
         String LAT = "lat";
@@ -32,6 +33,11 @@ public final class DatabaseContract {
     interface StatsColumns {
         String KEY = "key";
         String VALUE = "value";
+    }
+
+    interface TrackColumns {
+        String LAT = "lat";
+        String LON = "lon";
     }
 
     public static class Reports implements ReportsColumns, BaseColumns {
@@ -55,6 +61,13 @@ public final class DatabaseContract {
         public static Uri buildReportUri(long reportId) {
             return ContentUris.withAppendedId(CONTENT_URI, reportId);
         }
+    }
+
+    public static class Track implements TrackColumns {
+        public static final Uri CONTENT_URI =
+                BASE_CONTENT_URI.buildUpon().appendPath(PATH_TRACK).build();
+        public static final String CONTENT_ITEM_TYPE = ContentResolver.CURSOR_ITEM_BASE_TYPE
+                + "vnd.mozstumbler.track";
     }
 
     public static class Stats implements StatsColumns {

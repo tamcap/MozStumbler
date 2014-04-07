@@ -12,10 +12,12 @@ import static org.mozilla.mozstumbler.provider.DatabaseContract.*;
 
 public class Database extends SQLiteOpenHelper {
     private static final String LOGTAG = Database.class.getName();
-    private static final int DATABASE_VERSION = 2;
+    private static final int DATABASE_VERSION = 3;
     private static final String DATABASE_NAME = "stumbler.db";
     static final String TABLE_REPORTS = "reports";
     static final String TABLE_STATS = "stats";
+    static final String TABLE_TRACK = "track";
+    static final String INDEX_TRACK = "track_index";
 
     public Database(Context context) {
         super(context, DATABASE_NAME, null, DATABASE_VERSION);
@@ -28,7 +30,12 @@ public class Database extends SQLiteOpenHelper {
                 + BaseColumns._ID + " INTEGER PRIMARY KEY,"
                 + StatsColumns.KEY + " VARCHAR(80) UNIQUE NOT NULL,"
                 + StatsColumns.VALUE + " TEXT NOT NULL)");
-
+        db.execSQL("CREATE TABLE " + TABLE_TRACK + " ("
+                + BaseColumns._ID + " INTEGER PRIMARY KEY,"
+                + TrackColumns.LAT + " INTEGER NOT NULL,"
+                + TrackColumns.LON + " INTEGER NOT NULL)");
+        db.execSQL("CREATE INDEX " + INDEX_TRACK + " ON "
+                + TABLE_TRACK + " (" + TrackColumns.LAT + ")");
         db.insertWithOnConflict(TABLE_STATS, null, Stats.values(Stats.KEY_LAST_UPLOAD_TIME, "0"), SQLiteDatabase.CONFLICT_REPLACE);
         db.insertWithOnConflict(TABLE_STATS, null, Stats.values(Stats.KEY_OBSERVATIONS_SENT, "0"), SQLiteDatabase.CONFLICT_REPLACE);
         db.insertWithOnConflict(TABLE_STATS, null, Stats.values(Stats.KEY_WIFIS_SENT, "0"), SQLiteDatabase.CONFLICT_REPLACE);
@@ -42,14 +49,17 @@ public class Database extends SQLiteOpenHelper {
         int version = oldVersion;
         switch (version) {
             case 1:
+            case 2:
                 db.execSQL("DROP TABLE IF EXISTS " + TABLE_REPORTS);
-                createTableReports(db);
-                version = 2;
+                db.execSQL("DROP TABLE IF EXISTS " + TABLE_STATS);
+                onCreate(db);
+                version = 3;
         }
 
         if (version != DATABASE_VERSION) {
             db.execSQL("DROP TABLE IF EXISTS " + TABLE_REPORTS);
             db.execSQL("DROP TABLE IF EXISTS " + TABLE_STATS);
+            db.execSQL("DROP TABLE IF EXISTS " + TABLE_TRACK);
             onCreate(db);
         }
     }

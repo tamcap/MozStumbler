@@ -215,5 +215,11 @@ final class Reporter extends BroadcastReceiver {
         values.put(Reports.WIFI_COUNT, wifiJSON.length());
 
         mContentResolver.insert(Reports.CONTENT_URI, values);
+
+        ContentValues track = new ContentValues(2);
+        track.put(Track.LAT, Math.round(values.getAsDouble(Reports.LAT)*1.0E6));
+        track.put(Track.LON, Math.round(values.getAsDouble(Reports.LON)*1.0E6));
+
+        mContentResolver.insert(Track.CONTENT_URI, track);
     }
 }

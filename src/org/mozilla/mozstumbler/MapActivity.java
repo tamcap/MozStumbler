@@ -3,12 +3,15 @@ package org.mozilla.mozstumbler;
 import android.annotation.TargetApi;
 import android.app.Activity;
 import android.content.BroadcastReceiver;
+import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.database.Cursor;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Point;
+import android.graphics.Rect;
 import android.net.wifi.ScanResult;
 import android.os.AsyncTask;
 import android.os.Build;
@@ -30,11 +33,14 @@ import org.json.JSONObject;
 import org.mozilla.mozstumbler.cellscanner.CellInfo;
 import org.mozilla.mozstumbler.cellscanner.CellScanner;
 import org.mozilla.mozstumbler.communicator.Searcher;
+import org.mozilla.mozstumbler.provider.Database;
+import org.mozilla.mozstumbler.provider.DatabaseContract;
 import org.osmdroid.tileprovider.MapTileProviderBasic;
 import org.osmdroid.tileprovider.tilesource.ITileSource;
 import org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase;
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory;
 import org.osmdroid.tileprovider.tilesource.XYTileSource;
+import org.osmdroid.util.BoundingBoxE6;
 import org.osmdroid.util.GeoPoint;
 import org.osmdroid.views.MapView;
 import org.osmdroid.views.overlay.ItemizedIconOverlay;
@@ -115,10 +121,12 @@ public final class MapActivity extends Activity {
         TilesOverlay coverageTilesOverlay = CoverageTilesOverlay(this);
         mMap.getOverlays().add(coverageTilesOverlay);
 
+
         mReceiver = new ReporterBroadcastReceiver();
         registerReceiver(mReceiver, new IntentFilter(ScannerService.MESSAGE_TOPIC));
 
         mMap.getController().setZoom(2);
+        new TrackOverlayTask().execute(mMap);
 
         Log.d(LOGTAG, "onCreate");
     }
@@ -181,6 +189,7 @@ public final class MapActivity extends Activity {
         mAccuracyOverlay = new AccuracyCircleOverlay(MapActivity.this, point, accuracy);
         mMap.getOverlays().add(mPointOverlay); // You are here!
         mMap.getOverlays().add(mAccuracyOverlay);
+        new TrackOverlayTask().execute(mMap);
         mMap.invalidate();
     }
 
@@ -214,6 +223,75 @@ public final class MapActivity extends Activity {
             circle.setAlpha(165);
             circle.setStyle(Paint.Style.STROKE);
             c.drawCircle(center.x, center.y, radius, circle);
+        }
+    }
+
+    private class TrackOverlayTask extends AsyncTask <MapView, Void, GeoPoint[]> {
+        private ContentResolver mContentResolver;
+
+        protected GeoPoint[] doInBackground(MapView... mapViews) {
+            mContentResolver = MapActivity.this.getContentResolver();
+            MapView.Projection pj = mapViews[0].getProjection();
+            BoundingBoxE6 boxE6 = pj.getBoundingBox();
+            Cursor cursor = mContentResolver.query(DatabaseContract.Track.CONTENT_URI, null,
+                    DatabaseContract.Track.LAT + " > ? AND "
+                            + DatabaseContract.Track.LAT + " < ? AND "
+                            + DatabaseContract.Track.LON + " > ? AND "
+                            + DatabaseContract.Track.LON + " < ?",
+                    new String[] {
+                            String.valueOf(boxE6.getLatSouthE6()),
+                            String.valueOf(boxE6.getLatNorthE6()),
+                            String.valueOf(boxE6.getLonWestE6()),
+                            String.valueOf(boxE6.getLonEastE6()),
+                    },
+                    null);
+            if (cursor == null) { return null; }
+
+            GeoPoint[] batch = null;
+            try {
+                batch = getRequestBody(cursor);
+                if (batch == null) { return null; }
+            } finally {
+                cursor.close();
+            }
+            return batch;
+        }
+
+        @Override
+        protected void onPostExecute(GeoPoint[] points) {
+            ArrayList<OverlayItem> items = new ArrayList<OverlayItem>();
+            for (int i = 0; i < points.length; i++) {
+                items.add(new OverlayItem(null, null, points[i]));
+            }
+            mMap.getOverlays().add(new ItemizedOverlayWithFocus<OverlayItem>(
+                    MapActivity.this,
+                    items,
+                    new ItemizedIconOverlay.OnItemGestureListener<OverlayItem>() {
+                        @Override
+                        public boolean onItemSingleTapUp(int index, OverlayItem item) { return false; }
+                        @Override
+                        public boolean onItemLongPress(int index, OverlayItem item) { return false; }
+                    }));
+        }
+
+        private GeoPoint[] getRequestBody(Cursor cursor) {
+            if (cursor.getCount()==0) { return null; }
+            final GeoPoint[] pointArray = new GeoPoint[cursor.getCount()];
+            int iterator = 0;
+            final int columnLat = cursor.getColumnIndex(DatabaseContract.Track.LAT);
+            final int columnLon = cursor.getColumnIndex(DatabaseContract.Track.LON);
+
+            cursor.moveToPosition(-1);
+            while (cursor.moveToNext()) {
+                pointArray[iterator].setCoordsE6(
+                        cursor.getInt(columnLat),
+                        cursor.getInt(columnLon)
+                );
+            }
+
+            if (pointArray.length == 0) { return null;}
+
+            return pointArray;
         }
     }
 
