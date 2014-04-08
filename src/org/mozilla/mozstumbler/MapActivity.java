@@ -37,6 +37,9 @@ import org.mozilla.mozstumbler.cellscanner.CellScanner;
 import org.mozilla.mozstumbler.communicator.Searcher;
 import org.mozilla.mozstumbler.provider.Database;
 import org.mozilla.mozstumbler.provider.DatabaseContract;
+import org.osmdroid.events.MapListener;
+import org.osmdroid.events.ScrollEvent;
+import org.osmdroid.events.ZoomEvent;
 import org.osmdroid.tileprovider.MapTileProviderBasic;
 import org.osmdroid.tileprovider.tilesource.ITileSource;
 import org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase;
@@ -66,6 +69,7 @@ public final class MapActivity extends Activity {
     private MapView mMap;
     private AccuracyCircleOverlay mAccuracyOverlay;
     private ItemizedOverlay<OverlayItem> mPointOverlay;
+    private ItemizedOverlay<OverlayItem> mTrackOverlay;
 
     private ReporterBroadcastReceiver mReceiver;
 
@@ -128,7 +132,26 @@ public final class MapActivity extends Activity {
         registerReceiver(mReceiver, new IntentFilter(ScannerService.MESSAGE_TOPIC));
 
         mMap.getController().setZoom(2);
+        mMap.setMapListener(new MapListener() {
+            @Override
+            public boolean onScroll(ScrollEvent scrollEvent) {
+                update();
+                return true;
+            }
 
+            @Override
+            public boolean onZoom(ZoomEvent zoomEvent) {
+                update();
+                return true;
+            }
+
+            private void update() {
+                mMap.getOverlays().remove(mTrackOverlay);
+                new TrackOverlayTask().execute(mMap);
+                mMap.invalidate();
+                Log.i(LOGTAG,"Zoom: " + mMap.getZoomLevel());
+            }
+        });
         Log.d(LOGTAG, "onCreate");
     }
 
@@ -190,7 +213,6 @@ public final class MapActivity extends Activity {
         mAccuracyOverlay = new AccuracyCircleOverlay(MapActivity.this, point, accuracy);
         mMap.getOverlays().add(mPointOverlay); // You are here!
         mMap.getOverlays().add(mAccuracyOverlay);
-        new TrackOverlayTask().execute(mMap);
         mMap.invalidate();
     }
 
@@ -227,10 +249,34 @@ public final class MapActivity extends Activity {
         }
     }
 
-    private class TrackOverlayTask extends AsyncTask <MapView, Void, GeoPoint[]> {
+    private class TrackOverlayTask extends AsyncTask <MapView, Void, ArrayList<GeoPoint>> {
         private ContentResolver mContentResolver;
 
-        protected GeoPoint[] doInBackground(MapView... mapViews) {
+        private GeoPoint[] getRequestBody(int zoomLevel, Cursor cursor) {
+            if (cursor.getCount()==0) { return null; }
+            final GeoPoint[] pointArray = new GeoPoint[cursor.getCount()];
+            int iterator = 0;
+            final int columnLat = cursor.getColumnIndex(DatabaseContract.Track.LAT);
+            final int columnLon = cursor.getColumnIndex(DatabaseContract.Track.LON);
+            final int factor;
+            if (zoomLevel > 15) { factor = 100; }
+            else if (zoomLevel > 14) { factor = 1000; }
+            else if (zoomLevel > 10)  { factor = 10000; }
+            else if (zoomLevel > 8)  { factor = 100000; }
+            else if (zoomLevel > 4)  { factor = 1000000; }
+            else                     { factor = 10000000; }
+            cursor.moveToPosition(-1);
+            while (cursor.moveToNext()) {
+                pointArray[iterator] = new GeoPoint((cursor.getInt(columnLat)/factor) * factor,(cursor.getInt(columnLon)/factor)*factor);
+                iterator = iterator + 1;
+            }
+
+            if (pointArray.length == 0) { return null;}
+
+            return pointArray;
+        }
+
+        protected ArrayList<GeoPoint> doInBackground(MapView... mapViews) {
             mContentResolver = MapActivity.this.getContentResolver();
             MapView.Projection pj = mapViews[0].getProjection();
             BoundingBoxE6 boxE6 = pj.getBoundingBox();
@@ -246,28 +292,40 @@ public final class MapActivity extends Activity {
                             String.valueOf(boxE6.getLonEastE6()),
                     },
                     null);
+            /* Cursor cursor = mContentResolver.query(DatabaseContract.Track.CONTENT_URI, null,
+                    null,null, null); */
             if (cursor == null) { return null; }
 
             GeoPoint[] batch = null;
             try {
-                batch = getRequestBody(cursor);
+                batch = getRequestBody(pj.getZoomLevel(), cursor);
                 if (batch == null) { return null; }
             } finally {
                 cursor.close();
             }
-            return batch;
+            return prunePoints(batch);
+        }
+
+        protected ArrayList<GeoPoint> prunePoints(GeoPoint[] points) {
+            ArrayList<GeoPoint> prunedPoints = new ArrayList<GeoPoint>(points.length);
+            prunedPoints.add(points[0]);
+            for (GeoPoint point : points) {
+                if (!prunedPoints.contains(point)) { prunedPoints.add(point);}
+            }
+            prunedPoints.trimToSize();
+            return prunedPoints;
         }
 
         @Override
-        protected void onPostExecute(GeoPoint[] points) {
+        protected void onPostExecute(ArrayList<GeoPoint> points) {
             ArrayList<OverlayItem> items = new ArrayList<OverlayItem>();
             if (points == null) { return; }
-            for (int i = 0; i < points.length; i++) {
-                OverlayItem item = new OverlayItem(null, null, points[i]);
+            for (GeoPoint point : points) {
+                OverlayItem item = new OverlayItem(null, null, point);
                 item.setMarker(getResources().getDrawable(android.R.drawable.ic_input_add));
                 items.add(item);
             }
-            mMap.getOverlays().add(new ItemizedOverlayWithFocus<OverlayItem>(
+            mTrackOverlay = new ItemizedOverlayWithFocus<OverlayItem>(
                     MapActivity.this,
                     items,
                     new ItemizedIconOverlay.OnItemGestureListener<OverlayItem>() {
@@ -275,27 +333,11 @@ public final class MapActivity extends Activity {
                         public boolean onItemSingleTapUp(int index, OverlayItem item) { return false; }
                         @Override
                         public boolean onItemLongPress(int index, OverlayItem item) { return false; }
-                    }));
+                    });
+            mMap.getOverlays().add(mTrackOverlay);
         }
 
-        private GeoPoint[] getRequestBody(Cursor cursor) {
-            if (cursor.getCount()==0) { return null; }
-            final GeoPoint[] pointArray = new GeoPoint[cursor.getCount()];
-            int iterator = 0;
-            final int columnLat = cursor.getColumnIndex(DatabaseContract.Track.LAT);
-            final int columnLon = cursor.getColumnIndex(DatabaseContract.Track.LON);
-
-            cursor.moveToPosition(-1);
-            while (cursor.moveToNext()) {
-                pointArray[iterator] = new GeoPoint(cursor.getInt(columnLat),cursor.getInt(columnLon));
-                iterator = iterator + 1;
-            }
-
-            if (pointArray.length == 0) { return null;}
-
-            return pointArray;
-        }
-    }
+       }
 
     private ItemizedOverlay<OverlayItem> getMapMarker(GeoPoint point) {
         ArrayList<OverlayItem> items = new ArrayList<OverlayItem>();
